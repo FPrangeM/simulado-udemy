@@ -651,6 +651,45 @@ const App = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const startTimeRef = useRef(null);
 
+  // Load from localStorage on mount
+  useEffect(() => {
+    const savedState = localStorage.getItem('simuladoState');
+    if (savedState) {
+      const parsed = JSON.parse(savedState);
+      setMode(parsed.mode || 'input');
+      setQuestions(parsed.questions || []);
+      setCurrentQIndex(parsed.currentQIndex || 0);
+      setDraftAnswers(parsed.draftAnswers || {});
+      setQuestionStatus(parsed.questionStatus || {});
+      setRawText(parsed.rawText || DEMO_TEXT.trim());
+      if (parsed.startTime) startTimeRef.current = parsed.startTime;
+    }
+
+    const savedHistory = localStorage.getItem('simuladoHistory');
+    if (savedHistory) {
+      setAttemptHistory(JSON.parse(savedHistory));
+    }
+  }, []);
+
+  // Save current state to localStorage
+  useEffect(() => {
+    const state = {
+      mode,
+      questions,
+      currentQIndex,
+      draftAnswers,
+      questionStatus,
+      rawText,
+      startTime: startTimeRef.current
+    };
+    localStorage.setItem('simuladoState', JSON.stringify(state));
+  }, [mode, questions, currentQIndex, draftAnswers, questionStatus, rawText]);
+
+  // Save history to localStorage
+  useEffect(() => {
+    localStorage.setItem('simuladoHistory', JSON.stringify(attemptHistory));
+  }, [attemptHistory]);
+
   const handleLoadQuiz = () => {
     const parsed = parseQuizText(rawText);
     if (parsed && parsed.length > 0) {
@@ -667,6 +706,16 @@ const App = () => {
       setDraftAnswers({});
       setQuestionStatus({});
       startTimeRef.current = Date.now();
+  };
+
+  const resetQuiz = () => {
+    localStorage.removeItem('simuladoState');
+    setMode('input');
+    setQuestions([]);
+    setCurrentQIndex(0);
+    setDraftAnswers({});
+    setQuestionStatus({});
+    startTimeRef.current = null;
   };
 
   const finishQuiz = () => {
@@ -747,7 +796,7 @@ const App = () => {
                 setSelectedAttempt(attempt);
                 setMode('review');
             }}
-            onBackToInput={() => setMode('input')}
+            onBackToInput={resetQuiz}
           />
       );
   }
@@ -762,6 +811,8 @@ const App = () => {
   }
 
   if (mode === 'input') {
+    const hasSavedQuiz = questions.length > 0;
+    
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white max-w-2xl w-full p-8 rounded-xl shadow-lg">
@@ -772,6 +823,30 @@ const App = () => {
             <h1 className="text-2xl font-bold text-gray-900">Carregar Simulado</h1>
             <p className="text-gray-500 mt-2">Cole o texto do seu arquivo abaixo.</p>
           </div>
+          
+          {hasSavedQuiz && (
+            <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-medium text-purple-900">Simulado em andamento</span>
+                <span className="text-sm text-purple-700">{questions.length} perguntas</span>
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setMode('quiz')}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg transition-all"
+                >
+                  Continuar
+                </button>
+                <button 
+                  onClick={resetQuiz}
+                  className="px-4 py-2 border border-purple-300 text-purple-700 rounded-lg hover:bg-purple-100 transition-all"
+                >
+                  Novo
+                </button>
+              </div>
+            </div>
+          )}
+          
           <textarea 
             className="w-full h-64 p-4 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 outline-none mb-6 text-gray-700"
             placeholder="Cole o texto aqui..."
@@ -783,7 +858,7 @@ const App = () => {
             className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2"
           >
             <Play size={20} />
-            Gerar Simulado
+            {hasSavedQuiz ? 'Substituir Simulado' : 'Gerar Simulado'}
           </button>
           
           {attemptHistory.length > 0 && (
