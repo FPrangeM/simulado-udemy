@@ -638,54 +638,58 @@ const QuestionOption = ({ option, isSelected, isSubmitted, onSelect }) => {
 };
 
 const App = () => {
-  const [mode, setMode] = useState('input'); // input, quiz, results, review
-  const [rawText, setRawText] = useState(DEMO_TEXT.trim());
-  const [questions, setQuestions] = useState([]);
-  const [attemptHistory, setAttemptHistory] = useState([]);
-  const [selectedAttempt, setSelectedAttempt] = useState(null);
-  const [isLoaded, setIsLoaded] = useState(false);
+  // Initialize state from localStorage or default values
+  const [mode, setMode] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).mode : 'input';
+  });
   
-  // Quiz State
-  const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [draftAnswers, setDraftAnswers] = useState({}); 
-  const [questionStatus, setQuestionStatus] = useState({});
+  const [rawText, setRawText] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).rawText : DEMO_TEXT.trim();
+  });
+  
+  const [questions, setQuestions] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).questions : [];
+  });
+  
+  const [currentQIndex, setCurrentQIndex] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).currentQIndex : 0;
+  });
+  
+  const [draftAnswers, setDraftAnswers] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).draftAnswers : {};
+  });
+  
+  const [questionStatus, setQuestionStatus] = useState(() => {
+    const saved = localStorage.getItem('simuladoState');
+    return saved ? JSON.parse(saved).questionStatus : {};
+  });
+  
+  const [attemptHistory, setAttemptHistory] = useState(() => {
+    const saved = localStorage.getItem('simuladoHistory');
+    return saved ? JSON.parse(saved) : [];
+  });
+  
+  const [selectedAttempt, setSelectedAttempt] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const startTimeRef = useRef(null);
   const mainContentRef = useRef(null);
 
-  // Load from localStorage on mount
+  // Initialize startTimeRef from localStorage
   useEffect(() => {
-    const savedState = localStorage.getItem('simuladoState');
-    if (savedState) {
-      try {
-        const parsed = JSON.parse(savedState);
-        setMode(parsed.mode || 'input');
-        setQuestions(parsed.questions || []);
-        setCurrentQIndex(parsed.currentQIndex || 0);
-        setDraftAnswers(parsed.draftAnswers || {});
-        setQuestionStatus(parsed.questionStatus || {});
-        setRawText(parsed.rawText || DEMO_TEXT.trim());
-        if (parsed.startTime) startTimeRef.current = parsed.startTime;
-      } catch (e) {
-        console.error('Error loading state:', e);
-      }
+    const saved = localStorage.getItem('simuladoState');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.startTime) startTimeRef.current = parsed.startTime;
     }
-
-    const savedHistory = localStorage.getItem('simuladoHistory');
-    if (savedHistory) {
-      try {
-        setAttemptHistory(JSON.parse(savedHistory));
-      } catch (e) {
-        console.error('Error loading history:', e);
-      }
-    }
-    setIsLoaded(true);
   }, []);
 
-  // Save current state to localStorage (only after initial load)
+  // Save to localStorage whenever state changes
   useEffect(() => {
-    if (!isLoaded) return;
-    
     const state = {
       mode,
       questions,
@@ -696,22 +700,11 @@ const App = () => {
       startTime: startTimeRef.current
     };
     localStorage.setItem('simuladoState', JSON.stringify(state));
-  }, [mode, questions, currentQIndex, draftAnswers, questionStatus, rawText, isLoaded]);
+  }, [mode, questions, currentQIndex, draftAnswers, questionStatus, rawText]);
 
-  // Save history to localStorage (only after initial load)
   useEffect(() => {
-    if (!isLoaded) return;
     localStorage.setItem('simuladoHistory', JSON.stringify(attemptHistory));
-  }, [attemptHistory, isLoaded]);
-
-  // Show loading while restoring state
-  if (!isLoaded) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">Carregando...</div>
-      </div>
-    );
-  }
+  }, [attemptHistory]);
 
   const handleLoadQuiz = () => {
     const parsed = parseQuizText(rawText);
