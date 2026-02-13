@@ -651,6 +651,7 @@ const App = () => {
   const [questionStatus, setQuestionStatus] = useState({});
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const startTimeRef = useRef(null);
+  const mainContentRef = useRef(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -705,7 +706,11 @@ const App = () => {
 
   // Show loading while restoring state
   if (!isLoaded) {
-    return null;
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-500">Carregando...</div>
+      </div>
+    );
   }
 
   const handleLoadQuiz = () => {
@@ -801,7 +806,6 @@ const App = () => {
       }
   };
 
-  const mainContentRef = useRef(null);
   useEffect(() => { if (mainContentRef.current) mainContentRef.current.scrollTop = 0; }, [currentQIndex]);
 
   // --- Render Views ---
