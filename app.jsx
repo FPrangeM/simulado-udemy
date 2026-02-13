@@ -9,7 +9,10 @@ import {
   FileText, 
   Play,
   Upload,
-  Check
+  Check,
+  ChevronDown,
+  Filter,
+  MinusCircle
 } from 'lucide-react';
 
 // --- Default Data for Demonstration ---
@@ -53,14 +56,10 @@ Ingesting and processing the data
 `;
 
 // --- Parser Logic ---
-
 const parseQuizText = (text) => {
   if (!text) return [];
 
-  // Normalize line endings
   const normalizedText = text.replace(/\r\n/g, '\n');
-  
-  // Split by "Pergunta X"
   const rawChunks = normalizedText.split(/(?=Pergunta \d+)/);
   
   const questions = rawChunks
@@ -68,11 +67,8 @@ const parseQuizText = (text) => {
     .map((chunk, index) => {
       try {
         const lines = chunk.trim().split('\n').map(l => l.trim()).filter(l => l);
-        
-        // 1. Extract Header (Pergunta X)
         const header = lines[0];
         
-        // 2. Identify Domain
         let domain = "";
         const domainIndex = lines.findIndex(l => l.toLowerCase().startsWith('domínio'));
         let contentLines = lines;
@@ -82,7 +78,6 @@ const parseQuizText = (text) => {
           contentLines = lines.slice(0, domainIndex);
         }
 
-        // 3. Remove artifacts
         let startIndex = 1;
         while(startIndex < contentLines.length && 
              (contentLines[startIndex].toLowerCase() === 'correto' || 
@@ -91,8 +86,6 @@ const parseQuizText = (text) => {
         }
         
         const fullContent = contentLines.slice(startIndex).join('\n');
-        
-        // Split by "Explicação"
         const parts = fullContent.split(/Explicação/i);
         
         if (parts.length < 2) return null; 
@@ -104,7 +97,6 @@ const parseQuizText = (text) => {
            let cleanSegment = textSegment.trim();
            let isCorrect = false;
 
-           // Check for correctness marker
            if (cleanSegment.includes('Sua resposta está correta') || cleanSegment.includes('Sua resposta está incorreta')) {
              if (cleanSegment.includes('Sua resposta está correta')) isCorrect = true;
              cleanSegment = cleanSegment.replace(/Sua resposta está correta/gi, '')
@@ -123,26 +115,18 @@ const parseQuizText = (text) => {
              }
            } else {
              const lines = cleanSegment.split('\n');
-             // Look for Reference
              const refIndex = lines.findIndex(l => l.includes('Reference:'));
              
              if (refIndex !== -1) {
                 const expl = lines.slice(0, refIndex + 1).join('\n');
                 const opt = lines.slice(refIndex + 1).join('\n');
-                
-                if (opt.toLowerCase().includes('sua resposta está correta')) {
-                    isCorrect = true;
-                }
+                if (opt.toLowerCase().includes('sua resposta está correta')) isCorrect = true;
                 const finalOpt = opt.replace(/Sua resposta está correta/gi, '').replace(/Sua resposta está incorreta/gi, '').trim();
-                
                 return { explanation: expl, nextOptionText: finalOpt, isCorrectNext: isCorrect };
              } else {
-                // Fallback
                 const nextOpt = lines.pop();
                 const expl = lines.join('\n');
-                 if (nextOpt && nextOpt.toLowerCase().includes('sua resposta está correta')) {
-                    isCorrect = true;
-                }
+                 if (nextOpt && nextOpt.toLowerCase().includes('sua resposta está correta')) isCorrect = true;
                 const finalOpt = nextOpt ? nextOpt.replace(/Sua resposta está correta/gi, '').replace(/Sua resposta está incorreta/gi, '').trim() : '';
                 return { explanation: expl, nextOptionText: finalOpt, isCorrectNext: isCorrect };
              }
@@ -150,38 +134,18 @@ const parseQuizText = (text) => {
         };
 
         const firstBlock = processPartForOption(parts[0], true);
-        options.push({ 
-            id: 0, 
-            text: firstBlock.text, 
-            isCorrect: firstBlock.isCorrect,
-            explanation: '' 
-        });
+        options.push({ id: 0, text: firstBlock.text, isCorrect: firstBlock.isCorrect, explanation: '' });
 
         for (let i = 1; i < parts.length; i++) {
            const result = processPartForOption(parts[i]);
-           if (options[i-1]) {
-               options[i-1].explanation = result.explanation;
-           }
+           if (options[i-1]) options[i-1].explanation = result.explanation;
            if (i < parts.length && result.nextOptionText) {
-                options.push({
-                    id: i,
-                    text: result.nextOptionText,
-                    isCorrect: result.isCorrectNext,
-                    explanation: ''
-                });
+                options.push({ id: i, text: result.nextOptionText, isCorrect: result.isCorrectNext, explanation: '' });
            }
         }
 
-        return {
-          id: index + 1,
-          header: header,
-          text: questionText,
-          options: options,
-          domain: domain
-        };
-
+        return { id: index + 1, header: header, text: questionText, options: options, domain: domain };
       } catch (e) {
-        console.error("Error parsing chunk", e);
         return null;
       }
     })
@@ -219,9 +183,7 @@ const Header = ({ current, total, onFinish }) => (
     <ProgressBar current={current} total={total} />
 
     <div className="flex items-center space-x-4">
-      <button className="text-purple-600 text-sm font-medium hover:underline">
-        Compartilhar feedback
-      </button>
+      <button className="text-purple-600 text-sm font-medium hover:underline">Compartilhar feedback</button>
       <button 
         onClick={onFinish}
         className="border border-purple-600 text-purple-600 px-4 py-1.5 rounded font-bold text-sm hover:bg-purple-50 transition-colors"
@@ -232,13 +194,65 @@ const Header = ({ current, total, onFinish }) => (
   </header>
 );
 
-const Sidebar = ({ questions, currentQuestionIndex, onSelectQuestion, isOpen, toggleSidebar }) => {
+const Sidebar = ({ questions, currentQuestionIndex, onSelectQuestion, isOpen, toggleSidebar, questionStatus }) => {
+  const [filter, setFilter] = useState('all'); // all, correct, incorrect, ignored, unanswered
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const getStatus = (idx) => questionStatus[idx] || { status: 'unanswered' };
+
+  const filteredQuestions = questions.map((q, i) => ({...q, originalIndex: i})).filter(q => {
+     const status = getStatus(q.originalIndex).status;
+     if (filter === 'all') return true;
+     if (filter === 'correct') return status === 'correct';
+     if (filter === 'incorrect') return status === 'incorrect';
+     if (filter === 'ignored') return status === 'ignored';
+     if (filter === 'unanswered') return status === 'unanswered';
+     return true;
+  });
+
+  const getStatusIcon = (status) => {
+      switch(status) {
+          case 'correct': return <CheckCircle size={14} className="text-green-600 fill-green-50" />;
+          case 'incorrect': return <XCircle size={14} className="text-red-600 fill-red-50" />;
+          case 'ignored': return <MinusCircle size={14} className="text-gray-400" />;
+          default: return <div className="w-3.5 h-3.5 border border-gray-300 rounded-sm"></div>;
+      }
+  };
+  
+  const getStatusText = (status) => {
+    switch(status) {
+        case 'correct': return <span className="text-green-700 font-bold ml-2 text-xs">Correto</span>;
+        case 'incorrect': return <span className="text-red-600 font-bold ml-2 text-xs">Incorreto</span>;
+        case 'ignored': return <span className="text-gray-500 font-medium ml-2 text-xs">Ignorado</span>;
+        default: return null;
+    }
+  };
+
+  const getFilterLabel = () => {
+     switch(filter) {
+         case 'all': return 'Todas as perguntas';
+         case 'correct': return 'Correto';
+         case 'incorrect': return 'Incorreto';
+         case 'ignored': return 'Ignorado';
+         case 'unanswered': return 'Sem resposta ainda';
+         default: return 'Todas as perguntas';
+     }
+  };
+
   if (!isOpen) {
      return (
-        <button 
-            onClick={toggleSidebar}
-            className="fixed left-4 top-20 bg-white p-2 rounded-full shadow-lg border z-20 md:hidden"
-        >
+        <button onClick={toggleSidebar} className="fixed left-4 top-20 bg-white p-2 rounded-full shadow-lg border z-20 md:hidden">
             <Menu size={20} />
         </button>
      );
@@ -248,55 +262,78 @@ const Sidebar = ({ questions, currentQuestionIndex, onSelectQuestion, isOpen, to
     <div className={`
       fixed inset-y-0 left-0 transform ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       md:relative md:translate-x-0 transition duration-200 ease-in-out
-      w-80 bg-white border-r flex flex-col h-[calc(100vh-64px)] z-20
+      w-80 bg-white border-r flex flex-col h-[calc(100vh-64px)] z-20 shadow-xl md:shadow-none
     `}>
-      <div className="p-4 border-b flex justify-between items-center bg-gray-50">
-        <h2 className="font-bold text-gray-700">Todas as perguntas</h2>
-        <div className="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer">
+      {/* Dropdown Header */}
+      <div className="p-4 border-b bg-gray-50 relative" ref={dropdownRef}>
+        <button 
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="flex justify-between items-center w-full bg-white border px-3 py-2 rounded-md hover:border-gray-400 transition-colors"
+        >
+            <span className="font-bold text-gray-700 text-sm">{getFilterLabel()}</span>
+            <ChevronDown size={16} className={`text-gray-500 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isDropdownOpen && (
+            <div className="absolute left-4 right-4 top-14 bg-white border rounded-lg shadow-lg z-30 py-1">
+                <button onClick={() => { setFilter('all'); setIsDropdownOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-700">Todas as perguntas</button>
+                <button onClick={() => { setFilter('correct'); setIsDropdownOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-700">Correto</button>
+                <button onClick={() => { setFilter('incorrect'); setIsDropdownOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-700">Incorreto</button>
+                <button onClick={() => { setFilter('ignored'); setIsDropdownOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-700">Ignorado</button>
+                <button onClick={() => { setFilter('unanswered'); setIsDropdownOpen(false); }} className="w-full text-left px-4 py-2 hover:bg-gray-50 text-sm text-gray-700">Sem resposta ainda</button>
+            </div>
+        )}
+
+        <div className="flex items-center space-x-2 text-sm text-gray-600 cursor-pointer mt-3">
            <span>Todos os domínios</span>
-           <ChevronLeft className="rotate-[-90deg]" size={14}/>
         </div>
       </div>
       
       <div className="flex-1 overflow-y-auto">
-        {questions.map((q, idx) => (
-          <div 
-            key={idx}
-            onClick={() => onSelectQuestion(idx)}
-            className={`
-              p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors relative
-              ${currentQuestionIndex === idx ? 'bg-gray-100' : ''}
-            `}
-          >
-             {currentQuestionIndex === idx && (
-                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-black"></div>
-             )}
-            <div className="flex justify-between items-start mb-1">
-               <span className="font-bold text-sm text-gray-900">{q.header}</span>
+        {filteredQuestions.length === 0 ? (
+            <div className="p-8 text-center text-gray-400 text-sm">Nenhuma pergunta encontrada neste filtro.</div>
+        ) : (
+            filteredQuestions.map((q) => {
+            const statusObj = getStatus(q.originalIndex);
+            
+            return (
+            <div 
+                key={q.originalIndex}
+                onClick={() => onSelectQuestion(q.originalIndex)}
+                className={`
+                p-4 border-b cursor-pointer hover:bg-gray-50 transition-colors relative
+                ${currentQuestionIndex === q.originalIndex ? 'bg-purple-50' : ''}
+                `}
+            >
+                {currentQuestionIndex === q.originalIndex && (
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-600"></div>
+                )}
+                <div className="flex items-center mb-1">
+                    <span className="mr-2">{getStatusIcon(statusObj.status)}</span>
+                    <span className="font-bold text-sm text-gray-900">{q.header}</span>
+                    {getStatusText(statusObj.status)}
+                </div>
+                <p className="text-xs text-gray-500 line-clamp-2 ml-6">
+                {q.text}
+                </p>
             </div>
-            <p className="text-xs text-gray-500 line-clamp-2">
-              {q.text}
-            </p>
-          </div>
-        ))}
+            )})
+        )}
       </div>
       <button onClick={toggleSidebar} className="md:hidden absolute top-2 right-2 p-1 text-gray-500"><ChevronLeft /></button>
     </div>
   );
 };
 
-const QuestionOption = ({ option, isSelected, isAnswered, onSelect }) => {
-  // --- Rendering Logic ---
-  
-  if (!isAnswered) {
-    // STATE: Not yet answered (Input Mode)
-    // Simple Radio Button style
+const QuestionOption = ({ option, isSelected, isSubmitted, onSelect }) => {
+  // Input Mode (Not Submitted)
+  if (!isSubmitted) {
     const containerClass = `border p-4 rounded-lg flex items-start cursor-pointer transition-all relative group mb-3
       ${isSelected ? 'border-black ring-1 ring-black bg-gray-50' : 'border-gray-300 hover:border-black'}`;
     
     return (
       <div onClick={() => onSelect(option.id)} className={containerClass}>
-        <div className={`w-5 h-5 rounded-full border ${isSelected ? 'border-[6px] border-black' : 'border-gray-400 group-hover:border-black'} mr-3 flex-shrink-0`}></div>
+        <div className={`w-5 h-5 rounded-full border ${isSelected ? 'border-[6px] border-black' : 'border-gray-400 group-hover:border-black'} mr-3 flex-shrink-0 transition-all`}></div>
         <span className="text-gray-800 text-sm md:text-base leading-relaxed">
           {option.text}
         </span>
@@ -304,42 +341,32 @@ const QuestionOption = ({ option, isSelected, isAnswered, onSelect }) => {
     );
   }
 
-  // STATE: Answered (Feedback Mode)
-  // We need to display: Header (optional), Option Text, Explanation
-  
+  // Feedback Mode (Submitted)
   const isCorrectOption = option.isCorrect;
   const isWrongSelection = isSelected && !isCorrectOption;
   
-  // Define styles based on role
   let containerClass = "rounded-lg overflow-hidden border mb-4 ";
   let header = null;
-  let icon = <div className="w-5 h-5 rounded-full border border-gray-400 mr-3 flex-shrink-0 opacity-50"></div>; // Default inactive icon
+  let icon = <div className="w-5 h-5 rounded-full border border-gray-400 mr-3 flex-shrink-0 opacity-50"></div>;
 
   if (isCorrectOption) {
-     // This is the CORRECT answer
      containerClass += "border-green-200 bg-white";
      icon = <CheckCircle className="w-5 h-5 text-green-700 mr-3 flex-shrink-0" />;
-     
-     // Header text changes if we selected it or not
      const headerText = isSelected ? "Sua resposta está correta" : "Resposta correta";
-     
      header = (
        <div className="bg-green-100 px-4 py-2 flex items-center border-b border-green-200">
           <span className="font-bold text-green-800 text-sm">{headerText}</span>
        </div>
      );
   } else if (isWrongSelection) {
-     // This is the WRONG answer the user clicked
      containerClass += "border-red-200 bg-white";
      icon = <XCircle className="w-5 h-5 text-red-600 mr-3 flex-shrink-0" />;
-     
      header = (
        <div className="bg-red-100 px-4 py-2 flex items-center border-b border-red-200">
           <span className="font-bold text-red-800 text-sm">Sua resposta está incorreta</span>
        </div>
      );
   } else {
-     // This is just a distractor (wrong and not selected)
      containerClass += "border-gray-200 bg-gray-50 opacity-80";
      icon = <div className="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>;
   }
@@ -347,17 +374,13 @@ const QuestionOption = ({ option, isSelected, isAnswered, onSelect }) => {
   return (
     <div className={containerClass}>
       {header}
-      
       <div className="p-4">
-        {/* Option Text Row */}
         <div className="flex items-start">
            {icon}
            <span className={`text-sm md:text-base leading-relaxed ${isCorrectOption ? 'font-medium text-gray-900' : 'text-gray-700'}`}>
              {option.text}
            </span>
         </div>
-
-        {/* Explanation Row - ALWAYS SHOWN if answered */}
         {option.explanation && (
           <div className="mt-4 pt-4 border-t border-gray-100 pl-8">
              <h4 className="font-bold text-gray-900 mb-1 text-sm">Explicação</h4>
@@ -377,7 +400,14 @@ const App = () => {
   const [questions, setQuestions] = useState([]);
   
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [userAnswers, setUserAnswers] = useState({}); 
+  
+  // State for Drafts (what user clicked but didn't submit)
+  const [draftAnswers, setDraftAnswers] = useState({}); 
+  
+  // State for Finalized Answers (what user submitted)
+  // Structure: { [questionIndex]: { selectedOptionId: number, isCorrect: boolean, status: 'correct'|'incorrect'|'ignored' } }
+  const [questionStatus, setQuestionStatus] = useState({});
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const handleLoadQuiz = () => {
@@ -386,24 +416,61 @@ const App = () => {
       setQuestions(parsed);
       setMode('quiz');
       setCurrentQIndex(0);
-      setUserAnswers({});
+      setDraftAnswers({});
+      setQuestionStatus({});
     } else {
-      alert("Não foi possível identificar perguntas no texto. Verifique o formato.");
+      alert("Não foi possível identificar perguntas no texto.");
     }
   };
 
   const handleSelectOption = (optionId) => {
-    setUserAnswers(prev => ({
-      ...prev,
-      [currentQIndex]: optionId
-    }));
+    // Only allow selection if not already submitted
+    if (!questionStatus[currentQIndex]) {
+        setDraftAnswers(prev => ({
+            ...prev,
+            [currentQIndex]: optionId
+        }));
+    }
+  };
+
+  const checkAnswer = () => {
+      const selectedId = draftAnswers[currentQIndex];
+      const question = questions[currentQIndex];
+      const selectedOption = question.options.find(o => o.id === selectedId);
+      
+      const isCorrect = selectedOption?.isCorrect || false;
+      
+      setQuestionStatus(prev => ({
+          ...prev,
+          [currentQIndex]: {
+              selectedOptionId: selectedId,
+              status: isCorrect ? 'correct' : 'incorrect',
+              isCorrect
+          }
+      }));
+  };
+  
+  const handleNext = () => {
+      // If we are moving forward without having answered, mark as Ignored
+      if (!questionStatus[currentQIndex]) {
+          setQuestionStatus(prev => ({
+              ...prev,
+              [currentQIndex]: {
+                  selectedOptionId: null,
+                  status: 'ignored',
+                  isCorrect: false
+              }
+          }));
+      }
+      
+      if (currentQIndex < questions.length - 1) {
+          setCurrentQIndex(currentQIndex + 1);
+      }
   };
 
   const mainContentRef = useRef(null);
   useEffect(() => {
-    if (mainContentRef.current) {
-        mainContentRef.current.scrollTop = 0;
-    }
+    if (mainContentRef.current) mainContentRef.current.scrollTop = 0;
   }, [currentQIndex]);
 
   if (mode === 'input') {
@@ -417,14 +484,12 @@ const App = () => {
             <h1 className="text-2xl font-bold text-gray-900">Carregar Simulado</h1>
             <p className="text-gray-500 mt-2">Cole o texto do seu arquivo abaixo.</p>
           </div>
-
           <textarea 
             className="w-full h-64 p-4 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 outline-none mb-6 text-gray-700"
             placeholder="Cole o texto aqui..."
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
           />
-
           <button 
             onClick={handleLoadQuiz}
             className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2"
@@ -438,8 +503,12 @@ const App = () => {
   }
 
   const currentQuestion = questions[currentQIndex];
-  const selectedOptionId = userAnswers[currentQIndex];
-  const isAnswered = selectedOptionId !== undefined;
+  const submission = questionStatus[currentQIndex];
+  const isSubmitted = !!submission;
+  
+  // Logic for selection: If submitted, use submission. If not, use draft.
+  const selectedOptionId = isSubmitted ? submission.selectedOptionId : draftAnswers[currentQIndex];
+  const hasDraftSelection = draftAnswers[currentQIndex] !== undefined && draftAnswers[currentQIndex] !== null;
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans text-gray-900">
@@ -456,6 +525,7 @@ const App = () => {
           onSelectQuestion={setCurrentQIndex}
           isOpen={isSidebarOpen}
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+          questionStatus={questionStatus}
         />
 
         <main ref={mainContentRef} className="flex-1 overflow-y-auto p-4 md:p-12 relative">
@@ -474,7 +544,7 @@ const App = () => {
                   key={opt.id}
                   option={opt}
                   isSelected={selectedOptionId === opt.id}
-                  isAnswered={isAnswered}
+                  isSubmitted={isSubmitted}
                   onSelect={handleSelectOption}
                 />
               ))}
@@ -489,12 +559,24 @@ const App = () => {
                 <ChevronLeft size={16} className="mr-1" /> Anterior
               </button>
 
-              <button 
-                onClick={() => setCurrentQIndex(Math.min(questions.length - 1, currentQIndex + 1))}
-                className="flex items-center bg-gray-900 text-white px-6 py-2.5 rounded font-bold text-sm hover:bg-gray-800 transition-colors"
-              >
-                 {currentQIndex === questions.length - 1 ? 'Finalizar' : 'Próxima'} <ChevronRight size={16} className="ml-1" />
-              </button>
+              <div className="flex gap-3">
+                  {!isSubmitted && hasDraftSelection ? (
+                       <button 
+                         onClick={checkAnswer}
+                         className="flex items-center bg-purple-600 text-white px-6 py-2.5 rounded font-bold text-sm hover:bg-purple-700 transition-colors shadow-sm"
+                       >
+                          Conferir resposta
+                       </button>
+                  ) : (
+                       <button 
+                         onClick={handleNext}
+                         className="flex items-center bg-gray-900 text-white px-6 py-2.5 rounded font-bold text-sm hover:bg-gray-800 transition-colors shadow-sm"
+                       >
+                          {currentQIndex === questions.length - 1 ? 'Finalizar' : 'Próxima'} 
+                          <ChevronRight size={16} className="ml-1" />
+                       </button>
+                  )}
+              </div>
            </div>
            
            <div className="h-12"></div>
