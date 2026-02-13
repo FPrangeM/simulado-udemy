@@ -6,10 +6,10 @@ import {
   CheckCircle, 
   XCircle, 
   AlertCircle, 
-  Settings, 
   FileText, 
   Play,
-  Upload
+  Upload,
+  Check
 } from 'lucide-react';
 
 // --- Default Data for Demonstration ---
@@ -61,7 +61,6 @@ const parseQuizText = (text) => {
   const normalizedText = text.replace(/\r\n/g, '\n');
   
   // Split by "Pergunta X"
-  // Lookahead regex to keep the delimiter
   const rawChunks = normalizedText.split(/(?=Pergunta \d+)/);
   
   const questions = rawChunks
@@ -73,7 +72,7 @@ const parseQuizText = (text) => {
         // 1. Extract Header (Pergunta X)
         const header = lines[0];
         
-        // 2. Identify Domain (usually at the end)
+        // 2. Identify Domain
         let domain = "";
         const domainIndex = lines.findIndex(l => l.toLowerCase().startsWith('domínio'));
         let contentLines = lines;
@@ -83,8 +82,7 @@ const parseQuizText = (text) => {
           contentLines = lines.slice(0, domainIndex);
         }
 
-        // 3. Remove "Correto"/"Incorreto" lines that appear immediately after header
-        // These are artifacts of the user's previous attempt in the source text
+        // 3. Remove artifacts
         let startIndex = 1;
         while(startIndex < contentLines.length && 
              (contentLines[startIndex].toLowerCase() === 'correto' || 
@@ -92,95 +90,46 @@ const parseQuizText = (text) => {
           startIndex++;
         }
         
-        // 4. Extract Question Text and Options
-        // Strategy: Use "Explicação" as an anchor.
-        // Everything before an "Explicação" is the Option (and potentially the Question if it's the first one).
-        
         const fullContent = contentLines.slice(startIndex).join('\n');
         
         // Split by "Explicação"
-        // This gives us parts like:
-        // Part 0: [Question Text] ... [Option 1]
-        // Part 1: [Explanation 1] ... [Option 2]
-        // Part 2: [Explanation 2] ... [Option 3]
-        
         const parts = fullContent.split(/Explicação/i);
         
-        if (parts.length < 2) return null; // Invalid format
+        if (parts.length < 2) return null; 
 
         const options = [];
         let questionText = "";
 
-        // Process Part 0 (Question + First Option)
-        // We need to separate Question from Option 1. 
-        // Heuristic: The Option 1 is likely the last paragraph/sentence of this block.
-        // However, we also need to handle "Sua resposta está correta".
-        
-        const processPartForOption = (textSegment, isFirstPart = false, previousExplanation = "") => {
+        const processPartForOption = (textSegment, isFirstPart = false) => {
            let cleanSegment = textSegment.trim();
            let isCorrect = false;
 
            // Check for correctness marker
            if (cleanSegment.includes('Sua resposta está correta') || cleanSegment.includes('Sua resposta está incorreta')) {
              if (cleanSegment.includes('Sua resposta está correta')) isCorrect = true;
-             // Remove the marker
              cleanSegment = cleanSegment.replace(/Sua resposta está correta/gi, '')
                                         .replace(/Sua resposta está incorreta/gi, '')
                                         .trim();
            }
 
            if (isFirstPart) {
-             // Split into paragraphs. Last paragraph is likely the option.
-             // This is risky but standard for this format where there is no "A)" or bullet.
              const paragraphs = cleanSegment.split('\n');
              if (paragraphs.length > 1) {
-                const optText = paragraphs.pop(); // Last one is option
-                questionText = paragraphs.join('\n'); // Rest is question
+                const optText = paragraphs.pop(); 
+                questionText = paragraphs.join('\n'); 
                 return { text: optText, isCorrect };
              } else {
-               // Fallback if it's all one line? unlikely
                return { text: cleanSegment, isCorrect }; 
              }
            } else {
-             // For subsequent parts, the textSegment contains:
-             // [Rest of Previous Explanation] (Wait, we split by "Explicação")
-             // actually, the split removed "Explicação". 
-             // So Part 1 starts with the Explanation text for Option 1.
-             // AND ends with the Text for Option 2.
-             
-             // We need to find where the Explanation ends and Option 2 starts.
-             // Explanation usually ends with "Reference: ..." or a period.
-             // Let's assume the Option starts on a new line after the reference.
-             
-             // We are processing the segment that contains: [Explanation for Prev Option] \n [Next Option Text]
-             // We return BOTH the explanation for the previous option AND the text for the new option.
-             
              const lines = cleanSegment.split('\n');
-             
-             // Find the split point. Usually explanations are long, options short.
-             // Or, look for Reference.
-             let splitIdx = lines.length - 1;
-             
-             // If we have "Sua resposta está correta" in the lines, that line is definitely part of the OPTION, not explanation.
-             
-             const explanationLines = [];
-             const optionLines = [];
-             
-             let foundOptionStart = false;
-             
-             // Scanning from bottom up might be safer to find the Option
-             // The Option is usually the last non-empty chunk.
-             
-             // Let's refine: The explanation usually has a "Reference:"
+             // Look for Reference
              const refIndex = lines.findIndex(l => l.includes('Reference:'));
+             
              if (refIndex !== -1) {
-                // Everything up to refIndex is explanation.
-                // RefIndex line is explanation.
-                // Everything after is Option.
                 const expl = lines.slice(0, refIndex + 1).join('\n');
                 const opt = lines.slice(refIndex + 1).join('\n');
                 
-                // Check if "Sua resposta..." is in the option part
                 if (opt.toLowerCase().includes('sua resposta está correta')) {
                     isCorrect = true;
                 }
@@ -188,7 +137,7 @@ const parseQuizText = (text) => {
                 
                 return { explanation: expl, nextOptionText: finalOpt, isCorrectNext: isCorrect };
              } else {
-                // Fallback: Last line is option?
+                // Fallback
                 const nextOpt = lines.pop();
                 const expl = lines.join('\n');
                  if (nextOpt && nextOpt.toLowerCase().includes('sua resposta está correta')) {
@@ -200,46 +149,26 @@ const parseQuizText = (text) => {
            }
         };
 
-        // 1. Process first block to get Question and Option 1
         const firstBlock = processPartForOption(parts[0], true);
         options.push({ 
             id: 0, 
             text: firstBlock.text, 
             isCorrect: firstBlock.isCorrect,
-            explanation: '' // Will be filled by next part
+            explanation: '' 
         });
 
-        // 2. Process middle blocks
         for (let i = 1; i < parts.length; i++) {
            const result = processPartForOption(parts[i]);
-           
-           // The result contains the explanation for the PREVIOUS option (i-1)
-           // and the text for the CURRENT option (i) (unless it's the last part)
-           
            if (options[i-1]) {
                options[i-1].explanation = result.explanation;
            }
-           
-           // If there is a next option text (meaning this wasn't just the last explanation)
-           if (result.nextOptionText || i < parts.length - 1) { // logic check
-               // Wait, the last part ONLY has explanation for the last option. It has no "next option".
-               if (i < parts.length) {
-                   // Only add a new option if this isn't the purely final explanation block
-                   // Actually, split by Explicação means:
-                   // [Q+O1] , [E1+O2], [E2+O3], [E3]
-                   // So parts.length is 4. Options should be 3.
-                   
-                   if (result.nextOptionText) {
-                        options.push({
-                            id: i,
-                            text: result.nextOptionText,
-                            isCorrect: result.isCorrectNext,
-                            explanation: ''
-                        });
-                   }
-               }
-           } else {
-               // This was the last chunk, it purely contained the explanation for the last option
+           if (i < parts.length && result.nextOptionText) {
+                options.push({
+                    id: i,
+                    text: result.nextOptionText,
+                    isCorrect: result.isCorrectNext,
+                    explanation: ''
+                });
            }
         }
 
@@ -260,7 +189,6 @@ const parseQuizText = (text) => {
     
   return questions;
 };
-
 
 // --- Components ---
 
@@ -340,11 +268,9 @@ const Sidebar = ({ questions, currentQuestionIndex, onSelectQuestion, isOpen, to
               ${currentQuestionIndex === idx ? 'bg-gray-100' : ''}
             `}
           >
-             {/* Active Indicator Strip */}
              {currentQuestionIndex === idx && (
                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-black"></div>
              )}
-
             <div className="flex justify-between items-start mb-1">
                <span className="font-bold text-sm text-gray-900">{q.header}</span>
             </div>
@@ -354,114 +280,106 @@ const Sidebar = ({ questions, currentQuestionIndex, onSelectQuestion, isOpen, to
           </div>
         ))}
       </div>
-      
-      {/* Mobile Close Button */}
-      <button 
-        onClick={toggleSidebar}
-        className="md:hidden absolute top-2 right-2 p-1 text-gray-500"
-      >
-        <ChevronLeft />
-      </button>
+      <button onClick={toggleSidebar} className="md:hidden absolute top-2 right-2 p-1 text-gray-500"><ChevronLeft /></button>
     </div>
   );
 };
 
 const QuestionOption = ({ option, isSelected, isAnswered, onSelect }) => {
-  // Logic mimicking Udemy:
-  // Before answer: Standard radio hover.
-  // After answer:
-  // - If this option was selected AND Correct: Green border, check icon.
-  // - If this option was selected AND Incorrect: Red border.
-  // - If this option is Correct (regardless of selection): Show bold?
-  // Actually, based on screenshot 3:
-  // Incorrect selection -> Red Box. The correct answer is NOT explicitly highlighted green in the options list itself in the screenshot,
-  // BUT the explanation box below shows the correct answer text.
-  // However, usually helpful UIs highlight the correct one too. I'll stick to the screenshot visuals.
-  // Screenshot 2 (Correct): Green border around the radio box.
-  
-  let containerClass = "border p-4 rounded-lg flex items-start cursor-pointer transition-all relative group ";
-  let icon = <div className="w-5 h-5 rounded-full border border-gray-400 mr-3 flex-shrink-0 group-hover:border-black"></div>;
+  // --- Rendering Logic ---
   
   if (!isAnswered) {
-    containerClass += isSelected ? "border-black ring-1 ring-black bg-gray-50" : "border-gray-300 hover:border-black";
-    if (isSelected) icon = <div className="w-5 h-5 rounded-full border-[6px] border-black mr-3 flex-shrink-0"></div>;
+    // STATE: Not yet answered (Input Mode)
+    // Simple Radio Button style
+    const containerClass = `border p-4 rounded-lg flex items-start cursor-pointer transition-all relative group mb-3
+      ${isSelected ? 'border-black ring-1 ring-black bg-gray-50' : 'border-gray-300 hover:border-black'}`;
+    
+    return (
+      <div onClick={() => onSelect(option.id)} className={containerClass}>
+        <div className={`w-5 h-5 rounded-full border ${isSelected ? 'border-[6px] border-black' : 'border-gray-400 group-hover:border-black'} mr-3 flex-shrink-0`}></div>
+        <span className="text-gray-800 text-sm md:text-base leading-relaxed">
+          {option.text}
+        </span>
+      </div>
+    );
+  }
+
+  // STATE: Answered (Feedback Mode)
+  // We need to display: Header (optional), Option Text, Explanation
+  
+  const isCorrectOption = option.isCorrect;
+  const isWrongSelection = isSelected && !isCorrectOption;
+  
+  // Define styles based on role
+  let containerClass = "rounded-lg overflow-hidden border mb-4 ";
+  let header = null;
+  let icon = <div className="w-5 h-5 rounded-full border border-gray-400 mr-3 flex-shrink-0 opacity-50"></div>; // Default inactive icon
+
+  if (isCorrectOption) {
+     // This is the CORRECT answer
+     containerClass += "border-green-200 bg-white";
+     icon = <CheckCircle className="w-5 h-5 text-green-700 mr-3 flex-shrink-0" />;
+     
+     // Header text changes if we selected it or not
+     const headerText = isSelected ? "Sua resposta está correta" : "Resposta correta";
+     
+     header = (
+       <div className="bg-green-100 px-4 py-2 flex items-center border-b border-green-200">
+          <span className="font-bold text-green-800 text-sm">{headerText}</span>
+       </div>
+     );
+  } else if (isWrongSelection) {
+     // This is the WRONG answer the user clicked
+     containerClass += "border-red-200 bg-white";
+     icon = <XCircle className="w-5 h-5 text-red-600 mr-3 flex-shrink-0" />;
+     
+     header = (
+       <div className="bg-red-100 px-4 py-2 flex items-center border-b border-red-200">
+          <span className="font-bold text-red-800 text-sm">Sua resposta está incorreta</span>
+       </div>
+     );
   } else {
-    // Answered State
-    if (isSelected) {
-       if (option.isCorrect) {
-         // Correct Selection
-         containerClass += "border-green-700 bg-white ring-1 ring-green-700";
-         icon = <CheckCircle className="w-5 h-5 text-green-700 mr-3 flex-shrink-0" />;
-       } else {
-         // Incorrect Selection
-         containerClass += "border-red-600 bg-white ring-1 ring-red-600";
-         icon = <div className="w-5 h-5 rounded-full border-[6px] border-red-600 mr-3 flex-shrink-0"></div>;
-       }
-    } else {
-        // Not selected
-        containerClass += "border-gray-200 opacity-60";
-    }
+     // This is just a distractor (wrong and not selected)
+     containerClass += "border-gray-200 bg-gray-50 opacity-80";
+     icon = <div className="w-5 h-5 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>;
   }
 
   return (
-    <div onClick={() => !isAnswered && onSelect(option.id)} className={containerClass}>
-      {icon}
-      <span className={`text-sm md:text-base leading-relaxed ${isAnswered && isSelected && option.isCorrect ? 'font-medium text-gray-900' : 'text-gray-800'}`}>
-        {option.text}
-      </span>
+    <div className={containerClass}>
+      {header}
+      
+      <div className="p-4">
+        {/* Option Text Row */}
+        <div className="flex items-start">
+           {icon}
+           <span className={`text-sm md:text-base leading-relaxed ${isCorrectOption ? 'font-medium text-gray-900' : 'text-gray-700'}`}>
+             {option.text}
+           </span>
+        </div>
+
+        {/* Explanation Row - ALWAYS SHOWN if answered */}
+        {option.explanation && (
+          <div className="mt-4 pt-4 border-t border-gray-100 pl-8">
+             <h4 className="font-bold text-gray-900 mb-1 text-sm">Explicação</h4>
+             <p className="text-gray-600 text-sm leading-relaxed whitespace-pre-line">
+               {option.explanation}
+             </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
 
-const FeedbackBox = ({ isCorrect, correctOption, explanation }) => {
-  if (isCorrect) {
-    return (
-      <div className="mt-6 border border-green-200 rounded-lg overflow-hidden animate-fade-in">
-        <div className="bg-green-100 px-4 py-3 flex items-center">
-          <span className="font-bold text-green-800 text-sm">Sua resposta está correta</span>
-        </div>
-        <div className="p-4 bg-white">
-           <h4 className="font-bold text-gray-900 mb-2">Explicação</h4>
-           <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line">{explanation}</p>
-        </div>
-      </div>
-    );
-  } else {
-    return (
-      <div className="mt-6 border border-gray-200 rounded-lg overflow-hidden animate-fade-in">
-        {/* Error Header */}
-        <div className="bg-red-100 px-4 py-3 flex items-center border-b border-red-200">
-           <span className="font-bold text-red-800 text-sm">Sua resposta está incorreta</span>
-        </div>
-        
-        {/* Correct Answer Display (Based on screenshot 3 logic, usually displayed somewhere) */}
-        <div className="p-4 bg-white border-b border-gray-100">
-            <div className="flex items-start">
-               <CheckCircle className="w-5 h-5 text-gray-800 mr-3 flex-shrink-0 mt-0.5" />
-               <span className="font-bold text-gray-900 text-sm">{correctOption.text}</span>
-            </div>
-        </div>
-
-        {/* Explanation */}
-        <div className="p-4 bg-white">
-           <h4 className="font-bold text-gray-900 mb-2">Explicação</h4>
-           <p className="text-gray-700 text-sm leading-relaxed whitespace-pre-line">{explanation}</p>
-        </div>
-      </div>
-    );
-  }
-};
-
 const App = () => {
-  const [mode, setMode] = useState('input'); // 'input' | 'quiz'
+  const [mode, setMode] = useState('input'); 
   const [rawText, setRawText] = useState(DEMO_TEXT.trim());
   const [questions, setQuestions] = useState([]);
   
   const [currentQIndex, setCurrentQIndex] = useState(0);
-  const [userAnswers, setUserAnswers] = useState({}); // { [questionIndex]: optionId }
+  const [userAnswers, setUserAnswers] = useState({}); 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Parsing Effect
   const handleLoadQuiz = () => {
     const parsed = parseQuizText(rawText);
     if (parsed && parsed.length > 0) {
@@ -481,7 +399,6 @@ const App = () => {
     }));
   };
 
-  // Scroll to top when question changes
   const mainContentRef = useRef(null);
   useEffect(() => {
     if (mainContentRef.current) {
@@ -498,12 +415,12 @@ const App = () => {
               <Upload className="text-purple-600" size={32} />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Carregar Simulado</h1>
-            <p className="text-gray-500 mt-2">Cole o texto do seu arquivo abaixo para gerar o simulado interativo.</p>
+            <p className="text-gray-500 mt-2">Cole o texto do seu arquivo abaixo.</p>
           </div>
 
           <textarea 
             className="w-full h-64 p-4 border rounded-lg font-mono text-sm focus:ring-2 focus:ring-purple-500 outline-none mb-6 text-gray-700"
-            placeholder="Cole o texto aqui (Formato: Pergunta 1 ...)"
+            placeholder="Cole o texto aqui..."
             value={rawText}
             onChange={(e) => setRawText(e.target.value)}
           />
@@ -515,10 +432,6 @@ const App = () => {
             <Play size={20} />
             Gerar Simulado
           </button>
-          
-          <div className="mt-4 text-xs text-gray-400 text-center">
-            O texto deve seguir o padrão: "Pergunta X", opções e explicações.
-          </div>
         </div>
       </div>
     );
@@ -527,21 +440,9 @@ const App = () => {
   const currentQuestion = questions[currentQIndex];
   const selectedOptionId = userAnswers[currentQIndex];
   const isAnswered = selectedOptionId !== undefined;
-  
-  // Find relevant data for feedback
-  const selectedOption = currentQuestion.options.find(o => o.id === selectedOptionId);
-  const correctOption = currentQuestion.options.find(o => o.isCorrect);
-  // If answered, show explanation for the SELECTED option (if incorrect) or CORRECT option (if correct)
-  // Actually, usually you want to see the explanation for the correct answer regardless, 
-  // or specifically why your answer was wrong.
-  // The provided text maps specific explanations to specific options.
-  const explanationToShow = isAnswered 
-    ? (selectedOption?.explanation || correctOption?.explanation) 
-    : null;
 
   return (
     <div className="min-h-screen bg-white flex flex-col font-sans text-gray-900">
-      
       <Header 
         current={currentQIndex + 1} 
         total={questions.length} 
@@ -549,7 +450,6 @@ const App = () => {
       />
 
       <div className="flex flex-1 overflow-hidden">
-        
         <Sidebar 
           questions={questions} 
           currentQuestionIndex={currentQIndex}
@@ -558,21 +458,17 @@ const App = () => {
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         />
 
-        {/* Main Content Area */}
         <main ref={mainContentRef} className="flex-1 overflow-y-auto p-4 md:p-12 relative">
-           {/* Header / Meta */}
            <div className="flex items-center text-gray-500 text-sm mb-6">
               <span className="mr-2"><FileText size={16}/></span>
               <span>{currentQuestion.header}:</span>
            </div>
 
-           {/* Question Text */}
            <h2 className="text-lg md:text-xl font-bold text-gray-900 leading-relaxed mb-8">
              {currentQuestion.text}
            </h2>
 
-           {/* Options Grid */}
-           <div className="space-y-3 max-w-3xl">
+           <div className="space-y-4 max-w-3xl">
               {currentQuestion.options.map((opt) => (
                 <QuestionOption 
                   key={opt.id}
@@ -584,18 +480,6 @@ const App = () => {
               ))}
            </div>
 
-           {/* Feedback Section (Only appears after answering) */}
-           {isAnswered && (
-             <div className="max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <FeedbackBox 
-                   isCorrect={selectedOption?.isCorrect}
-                   correctOption={correctOption}
-                   explanation={explanationToShow || "Sem explicação disponível."}
-                />
-             </div>
-           )}
-
-           {/* Navigation Footer within Main */}
            <div className="max-w-3xl mt-12 flex justify-between items-center border-t pt-6">
               <button 
                 onClick={() => setCurrentQIndex(Math.max(0, currentQIndex - 1))}
@@ -613,7 +497,7 @@ const App = () => {
               </button>
            </div>
            
-           <div className="h-12"></div> {/* Bottom spacer */}
+           <div className="h-12"></div>
         </main>
       </div>
     </div>
