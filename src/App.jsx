@@ -643,6 +643,7 @@ const App = () => {
   const [questions, setQuestions] = useState([]);
   const [attemptHistory, setAttemptHistory] = useState([]);
   const [selectedAttempt, setSelectedAttempt] = useState(null);
+  const [isLoaded, setIsLoaded] = useState(false);
   
   // Quiz State
   const [currentQIndex, setCurrentQIndex] = useState(0);
@@ -655,24 +656,35 @@ const App = () => {
   useEffect(() => {
     const savedState = localStorage.getItem('simuladoState');
     if (savedState) {
-      const parsed = JSON.parse(savedState);
-      setMode(parsed.mode || 'input');
-      setQuestions(parsed.questions || []);
-      setCurrentQIndex(parsed.currentQIndex || 0);
-      setDraftAnswers(parsed.draftAnswers || {});
-      setQuestionStatus(parsed.questionStatus || {});
-      setRawText(parsed.rawText || DEMO_TEXT.trim());
-      if (parsed.startTime) startTimeRef.current = parsed.startTime;
+      try {
+        const parsed = JSON.parse(savedState);
+        setMode(parsed.mode || 'input');
+        setQuestions(parsed.questions || []);
+        setCurrentQIndex(parsed.currentQIndex || 0);
+        setDraftAnswers(parsed.draftAnswers || {});
+        setQuestionStatus(parsed.questionStatus || {});
+        setRawText(parsed.rawText || DEMO_TEXT.trim());
+        if (parsed.startTime) startTimeRef.current = parsed.startTime;
+      } catch (e) {
+        console.error('Error loading state:', e);
+      }
     }
 
     const savedHistory = localStorage.getItem('simuladoHistory');
     if (savedHistory) {
-      setAttemptHistory(JSON.parse(savedHistory));
+      try {
+        setAttemptHistory(JSON.parse(savedHistory));
+      } catch (e) {
+        console.error('Error loading history:', e);
+      }
     }
+    setIsLoaded(true);
   }, []);
 
-  // Save current state to localStorage
+  // Save current state to localStorage (only after initial load)
   useEffect(() => {
+    if (!isLoaded) return;
+    
     const state = {
       mode,
       questions,
@@ -683,12 +695,22 @@ const App = () => {
       startTime: startTimeRef.current
     };
     localStorage.setItem('simuladoState', JSON.stringify(state));
-  }, [mode, questions, currentQIndex, draftAnswers, questionStatus, rawText]);
+  }, [mode, questions, currentQIndex, draftAnswers, questionStatus, rawText, isLoaded]);
 
-  // Save history to localStorage
+  // Save history to localStorage (only after initial load)
   useEffect(() => {
+    if (!isLoaded) return;
     localStorage.setItem('simuladoHistory', JSON.stringify(attemptHistory));
-  }, [attemptHistory]);
+  }, [attemptHistory, isLoaded]);
+
+  // Show loading while restoring state
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-gray-500">Carregando...</div>
+      </div>
+    );
+  }
 
   const handleLoadQuiz = () => {
     const parsed = parseQuizText(rawText);
