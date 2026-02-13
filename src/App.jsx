@@ -705,11 +705,7 @@ const App = () => {
 
   // Show loading while restoring state
   if (!isLoaded) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-gray-500">Carregando...</div>
-      </div>
-    );
+    return null;
   }
 
   const handleLoadQuiz = () => {
